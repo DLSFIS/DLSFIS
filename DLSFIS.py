@@ -534,11 +534,9 @@ if __name__ == "__main__":
         # self-supervised training
         fused_kernel = get_fused_kernel(omics_list)  # fused KNN constraint matrix across multi-omics
 
-        data_sur_sup = pd.read_csv('D:\ML\DLSFIS\多组学数据\BIC\BREAST_Survival.csv', header=0, index_col=0)
-        # Result_P = []
-
-        best_P_value = results_0.p_value
-        temp_labels_pred = labels_pred
+        best_score = silhouette_score(Z_omics_fusion, labels_pred)
+        best_labels = labels_pred.copy()
+        temp_labels_pred = labels_pred.copy()
         for i in range(30):
             # optimize self-expression layer with self-supervision
             y_labels_kernel = get_labels_fused_ensm(y_labels, matrix_con)  # ensemble self-supervised sparse constraint matrix
@@ -546,20 +544,16 @@ if __name__ == "__main__":
             labels_pred, Z_omics = AE_Sup_fun(fused_kernel_sup, X_omics, loss_sup, lr, weight_xx, weight_self,
                                               weight_coef, weight_sup, cluster_num, device)
 
-            # compute survival p-value after self-supervised training
-            data_sur_sup['Label'] = labels_pred
-            results_sup = multivariate_logrank_test(data_sur_sup['Survival'], data_sur_sup['Label'],
-                                                    data_sur_sup['Death'])
-            # Result_P.append(results_sup.p_value)
-
-            # early stop if p-value no longer improves
-            if results_sup.p_value < best_P_value:
-                best_P_value = results_sup.p_value
+            #Performing internal validation via the silhouette coefficient
+            current_score = silhouette_score(Z_omics_fusion, labels_pred)
+            
+            if current_score > best_score:
+                best_score = current_score
+                best_labels = labels_pred.copy()
+                temp_labels_pred = labels_pred.copy()
             else:
-                labels_pred = temp_labels_pred
-                data_sur_sup['Label'] = labels_pred
+                labels_pred = temp_labels_pred  
                 break
-            temp_labels_pred = labels_pred
 
             # re-run ensemble classification
             X = Z_omics
@@ -569,11 +563,16 @@ if __name__ == "__main__":
 
 
         # final survival p-value
-        results_sup = multivariate_logrank_test(data_sur_sup['Survival'], data_sur_sup['Label'], data_sur_sup['Death'])
-        log10P = math.log10(results_sup.p_value)
-
+        data_sur_final = pd.read_csv(fr'D:\ML\DLSFIS\多组学数据\BIC\BREAST_Survival.csv', header=0, index_col=0)
+        data_sur_final['Label'] = labels_pred
+        #data_sur_final['Label'] = pd.Series(labels_pred, index=data_sur_final.index)
+        results_final = multivariate_logrank_test(data_sur_final['Survival'],
+                                                  data_sur_final['Label'],
+                                                  data_sur_final['Death'])
+        log10P = math.log10(results_final.p_value)
+        print(f'Final cluster={cluster_num}, P-value={results_final.p_value}, log10P={log10P}')
         clusternum_list.append(cluster_num)
-        pval_list.append(results_sup.p_value)
+        pval_list.append(results_final.p_value)
     df_clusternum['cluster_num'] = clusternum_list
     df_clusternum['p_val'] = pval_list
     df_clusternum.to_csv('D:\Paper  Code\experiment.csv', index=True)
